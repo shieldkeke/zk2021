@@ -9,6 +9,7 @@ import time
 from ser import Ser
 from pathlib import Path
 import cv2
+from get_img import MyVideoCapture
 import torch
 FILE = Path(__file__).resolve()
 ROOT = FILE.parents[0]  # YOLOv5 root directory
@@ -86,9 +87,8 @@ def run(weights=ROOT / 'best5-7.pt',  # model.pt path(s)
     if pt or jit:
         model.model.half() if half else model.model.float()
     ## open camera ##
-    cap = cv2.VideoCapture(0)
-    for i in range(6):
-        _,_ = cap.read()
+    cap = MyVideoCapture(0)
+    cap.read()
     #img_path = "img.jpg"
     t = int(round(time.time()*1000))
     img_path = "my_data/"+f"{t}"+".jpg"  
@@ -115,9 +115,7 @@ def run(weights=ROOT / 'best5-7.pt',  # model.pt path(s)
 
                 cnt_detect += 1 #counter of detect
 
-                for i in range(6):
-                    _,_ = cap.read()
-                _, img = cap.read()
+                img = cap.read()
                 img = cv2.flip(img, -1)#trans 180
                 cv2.imwrite(img_path, img)
 				
