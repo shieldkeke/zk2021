@@ -87,7 +87,7 @@ def run(weights=ROOT / 'best5-7.pt',  # model.pt path(s)
     if pt or jit:
         model.model.half() if half else model.model.float()
     ## open camera ##
-    cap = MyVideoCapture(0)
+    cap = MyVideoCapture('csi')
     cap.read()
     #img_path = "img.jpg"
     t = int(round(time.time()*1000))
