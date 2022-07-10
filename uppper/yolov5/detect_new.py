@@ -22,10 +22,15 @@ from utils.datasets import LoadImages
 from utils.general import (LOGGER, check_img_size, check_requirements, non_max_suppression, print_args, scale_coords)
 from utils.torch_utils import select_device, time_sync
 
+#####config#####
+TEST = True
+CSI = True
+two_floors = True #up and down in a picture
+FILT_N = False
+
 
 def filt_name(name,cnt_detect):
-    filt = False
-    if filt:
+    if FILT_N :
         if cnt_detect<=24 and not(name=="dp" or name=="xh"):
             return False
         if cnt_detect>24 and cnt_detect<=48 and not(name=="lsfk" or name=="hskf" or name=="mf"):
@@ -34,14 +39,24 @@ def filt_name(name,cnt_detect):
             return False
     return True
 
-def filt_y(res,cnt_detect):
-    height = 480
+def filt_y_area(res,cnt_detect):
+    area = (res[3]-res[1])*(res[2]-res[0])
+    print(area)
+
+    if area < 7000 and cnt_detect<=48 :
+        return False
+
+    if two_floors:
+        return True
+
+    if not CSI:
+        height = 480
+    else:
+        height = 384
     y = (res[1]+res[3])//2
     if y<height * 1/2:
         return False
-    area = (res[3]-res[1])*(res[2]-res[0])
-    if area < 7000 and cnt_detect<=48 :
-        return False
+
     
     return True
 
@@ -61,6 +76,17 @@ def filt_conf(conf,cls):
             if conf<0.9:
                 return False
     return True
+
+def is_up(res):
+    if not CSI:
+        height = 480
+    else:
+        height = 384
+    y = (res[1]+res[3])//2
+    if y<height * 1/2:
+        return True
+    else:
+        return False
 
 @torch.no_grad()
 def run(weights=ROOT / 'best5-7.pt',  # model.pt path(s)
@@ -96,21 +122,26 @@ def run(weights=ROOT / 'best5-7.pt',  # model.pt path(s)
 
     #####serial#####
     cnt_com = 0
-    com = Ser("/dev/ttyUSB0")
+    if not TEST:
+        com = Ser("/dev/ttyUSB0")
     #com = Ser('com9')
     #####competition rule####
     
     cnt_detect = 0
+
+
+
     while True:
         try:
             t = int(round(time.time()*1000))
             img_path = "my_data/"+f"{t}"+".jpg"  
             source = img_path  
-           
-            ch = com.get()
+            if not TEST:
+               ch = com.get()
       
-            if ch==b'@': 
-                com.clearWait()
+            if TEST or ch==b'@': 
+                if not TEST:
+                    com.clearWait()
                 print("begin to predict")
 
                 cnt_detect += 1 #counter of detect
@@ -165,19 +196,39 @@ def run(weights=ROOT / 'best5-7.pt',  # model.pt path(s)
 
                             # Write results
                             packet = f''
-                            
+                            if two_floors:
+                                x_up = [0,0,0]
+                                up_num = 0
+                                x_down = [0,0,0]
+                                down_num = 0
                             for *xyxy, conf, cls in reversed(det):
                                 res = torch.tensor(xyxy).numpy().astype(np.int32)
-                                if filt_conf(conf,names[int(cls)]) and  filt_name(names[int(cls)],cnt_detect) and filt_y(res,cnt_detect):#confidence + filer by rule and size
+                                if filt_conf(conf,names[int(cls)]) and  filt_name(names[int(cls)],cnt_detect) and filt_y_area(res,cnt_detect):#confidence + filer by rule and size
                                     num = num + 1
-                                    packet += f'{(res[0]+res[2])//2} '#add target x
-                            packet = f'# {num} '+packet
+                                    if not two_floors:
+                                        packet += f'{(res[0]+res[2])//2} '#add target x
+                                    else:
+                                        if is_up(res):
+                                            x_up[up_num] = (res[0]+res[2])//2
+                                            up_num = up_num + 1
+                                        else:
+                                            x_down[down_num] = (res[0]+res[2])//2
+                                            down_num = down_num + 1
+                            if two_floors:
+                                packet = f'# {x_up[0]} {x_up[1]} {x_up[2]} {x_down[0]} {x_down[1]} {x_down[2]}'
+                            else:
+                                packet = f'# {num} '+packet
                         else: 
-                            packet = '# 0 '#nothinng
+                            if not two_floors:
+                                packet = '# 0 '#nothinng
+                            else:
+                                packet = '# 0 0 0 0 0 0 '#nothinng
 
                         print(packet)#one pic one packet
+                        
                         ### send packet ###
-                        com.put(packet)
+                        if not TEST:
+                            com.put(packet)
                             
                             #    -------------->x
                             #    | x1,y1----
@@ -189,6 +240,7 @@ def run(weights=ROOT / 'best5-7.pt',  # model.pt path(s)
 
         except KeyboardInterrupt:
             print("KeyboardInterrupt")
+            cap.release()
             sys.exit(0)
         except Exception as e:
             print(e)
